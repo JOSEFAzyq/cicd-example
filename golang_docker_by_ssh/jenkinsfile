@@ -1,0 +1,47 @@
+pipeline {
+    agent any
+
+    environment {
+        imageName = "daishu-platform/hospital-manage" 
+        imageFullName = ""
+        shellPath = "/mydata/mysh/common.deploy.sh"
+        deployLog = "/mydata/mysh/log-hospital-manage.log"
+        harborUrl = "127.0.0.1:9000"
+        dockerFilePath = "./build/package/Dockerfile"
+        port = 8102
+        targetPort = 8061
+        containerVolume= "-v /mydata/nfs_share/go-app/hospital-manage/config:/go/app/config -v /mydata/logs/hospitaladm:/go/app/logs -v /mydata/nfs_share/go-app/hospital-manage/view:/go/app/view"
+    }
+    stages {
+        stage('Get Git Tag And Check Out') {
+            steps {
+                script {
+                    imageName = "${imageName}:${TAG}"
+                    imageFullName = "127.0.0.1:9000/${imageName}"
+                    echo "构建: ${TAG} 镜像全名:${imageFullName}"
+                }
+                sh "git checkout ${tag}"
+            }
+        }
+        stage('Build and make image') {
+            steps {
+                script {
+                    echo "name:${imageName} fullName:${imageFullName}"
+                    sh "docker build -f ${dockerFilePath} -t ${imageFullName} ."
+                }
+            }
+        }
+        stage('push to harbor') {
+            steps{
+                sh "docker login http://${harborUrl} -u daishu-jenkins -p daishuV5"
+                sh "docker push ${imageFullName}"
+            }
+        }
+        stage('notify app server') {
+            steps{
+                echo "${shellPath} -c ${targetPort} -p ${port} -i ${imageName} -v '${containerVolume}' > ${deployLog}"
+                sshPublisher(publishers: [sshPublisherDesc(configName: 'daishu-pro-A', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: "${shellPath} -c ${targetPort} -p ${port} -i ${imageName} -v '${containerVolume}' > ${deployLog}", execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+            }
+        }
+    }
+}
